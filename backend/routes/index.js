@@ -6,9 +6,7 @@ const todos = require('./todos');
 //   const users = require('./users');
 
 
-router.get("/", (req, res) => {
-  res.send("main page!");
-});
+router.get("/", (req, res) => res.json({ status: "ok" }));
 
 router.use("/todos", todos);
 // use other routes here

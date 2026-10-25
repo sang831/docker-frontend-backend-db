@@ -1,2 +1,10 @@
-node-modules
-npm-debug.log
+**/node_modules
+**/dist
+**/build
+**/.git
+**/.DS_Store
+.env
+.env.*
+!.env.example
+!.env.*.example
+npm-debug.log*

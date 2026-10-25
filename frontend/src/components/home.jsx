@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
-import axios from "axios";
+import { useCallback, useEffect, useState } from "react";
 import {
+  Alert,
   Button,
   Card,
   CardBody,
@@ -11,96 +11,121 @@ import {
   ModalBody,
   ModalHeader,
 } from "reactstrap";
+import { api, getErrorMessage } from "../api";
 import TodoForm from "./todo-form";
 
-const API_URL = process.env.REACT_APP_API_URL;
+function formatDueDate(value) {
+  const localDate = new Date(`${String(value).slice(0, 10)}T00:00:00`);
+  return Number.isNaN(localDate.getTime()) ? "" : localDate.toLocaleDateString();
+}
 
-const Home = () => {
+const Home = ({ onLogout }) => {
   const [todos, setTodos] = useState([]);
   const [modalOpen, setModalOpen] = useState(false);
-  useEffect(() => {
-    const getData = async () => {
-      getTodos();
-    };
-    getData();
-  }, []);
+  const [isLoading, setIsLoading] = useState(true);
+  const [completingId, setCompletingId] = useState(null);
+  const [error, setError] = useState("");
 
-  const getTodos = async () => {
+  const loadTodos = useCallback(async () => {
     try {
-      const res = await axios.get(`${API_URL}/todos`);
-      setTodos(res.data);
-    } catch (err) {
-      console.log(err);
+      const response = await api.get("/todos");
+      setTodos(response.data);
+      setError("");
+      return true;
+    } catch (requestError) {
+      if (requestError.response?.status === 401) {
+        onLogout();
+      } else {
+        setError(getErrorMessage(requestError, "Could not load your todos."));
+      }
+      return false;
+    } finally {
+      setIsLoading(false);
     }
-  };
+  }, [onLogout]);
 
-  const handleClick = async (id) => {
+  useEffect(() => {
+    loadTodos();
+  }, [loadTodos]);
+
+  const handleComplete = async (id) => {
+    setCompletingId(id);
+    setError("");
     try {
-      await axios.patch(`${API_URL}/todos/${id}`, {
-        is_complete: true,
-      });
-      await getTodos();
-    } catch (err) {
-      console.log("epic fail", err);
+      await api.patch(`/todos/${id}`, { is_complete: true });
+      await loadTodos();
+    } catch (requestError) {
+      if (requestError.response?.status === 401) onLogout();
+      else setError(getErrorMessage(requestError, "Could not update this todo."));
+    } finally {
+      setCompletingId(null);
     }
   };
 
   const handleNewTodo = async (todo) => {
+    setError("");
     try {
-      await axios.post(`${API_URL}/todos`, todo);
-      await getTodos();
+      await api.post("/todos", todo);
       setModalOpen(false);
-    } catch (err) {
-      console.log("Error: ", err);
+      await loadTodos();
+      return true;
+    } catch (requestError) {
+      if (requestError.response?.status === 401) onLogout();
+      else {
+        const message = getErrorMessage(requestError, "Could not save this todo.");
+        setError(message);
+        return message;
+      }
+      return false;
     }
   };
 
   return (
-    <>
-      <Card>
-        <CardBody>
-          <CardTitle tag="h1">Todos</CardTitle>
-          <ListGroup>
-            {todos.map((todo) => {
-              return (
-                <ListGroupItem
-                  title="Click this to complete."
-                  key={todo._id}
-                  action
-                  tag="a"
-                >
-                  <div className="d-flex w-100 justify-content-between">
-                    <div className="form-check">
-                      <input
-                        className="form-check-input"
-                        type="checkbox"
-                        onChange={() => handleClick(todo._id)}
-                        value="foobar"
-                        defaultChecked={todo.is_complete}
-                      />
+    <Card className="mt-5">
+      <CardBody>
+        <div className="d-flex justify-content-between align-items-center mb-3">
+          <CardTitle tag="h1" className="mb-0">Todos</CardTitle>
+          <Button color="secondary" outline onClick={onLogout}>Sign out</Button>
+        </div>
+        {error && <Alert color="danger" role="alert">{error}</Alert>}
+        {isLoading ? (
+          <p role="status">Loading todos…</p>
+        ) : todos.length === 0 ? (
+          <p>No open todos yet.</p>
+        ) : (
+          <ListGroup className="mb-3">
+            {todos.map((todo) => (
+              <ListGroupItem key={todo._id}>
+                <div className="d-flex gap-3 align-items-start">
+                  <input
+                    className="form-check-input mt-1"
+                    type="checkbox"
+                    aria-label={`Complete ${todo.title}`}
+                    checked={todo.is_complete}
+                    disabled={completingId === todo._id}
+                    onChange={() => handleComplete(todo._id)}
+                  />
+                  <div className="flex-grow-1">
+                    <div className="d-flex justify-content-between gap-3">
+                      <h2 className="h5 mb-1">{todo.title}</h2>
+                      {todo.due_date && <small>Due: {formatDueDate(todo.due_date)}</small>}
                     </div>
-                    <h5>{todo.title}</h5>
-                    <small>Due: {todo.due_date}</small>
+                    {todo.description && <p className="mb-0">{todo.description}</p>}
                   </div>
-                  <p className="mb-1">{todo.description}</p>
-                </ListGroupItem>
-              );
-            })}
+                </div>
+              </ListGroupItem>
+            ))}
           </ListGroup>
-          <Button onClick={() => setModalOpen(true)} color="primary">
-            Add Todo
-          </Button>
-        </CardBody>
-      </Card>
-      <Modal isOpen={modalOpen}>
-        <ModalHeader toggle={() => setModalOpen(!modalOpen)}>
-          Add new Todo
-        </ModalHeader>
+        )}
+        <Button color="primary" onClick={() => setModalOpen(true)}>Add Todo</Button>
+      </CardBody>
+      <Modal isOpen={modalOpen} toggle={() => setModalOpen((open) => !open)}>
+        <ModalHeader toggle={() => setModalOpen(false)}>Add new Todo</ModalHeader>
         <ModalBody>
           <TodoForm saveTodo={handleNewTodo} />
         </ModalBody>
       </Modal>
-    </>
+    </Card>
   );
 };
 

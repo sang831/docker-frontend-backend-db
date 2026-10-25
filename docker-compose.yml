@@ -1,38 +1,82 @@
-version: "3.8"
 services:
   web:
-    build: ./frontend
-    depends_on:
-      - api
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    init: true
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - -q
+        - -O
+        - /dev/null
+        - http://127.0.0.1/healthz
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
     networks:
-      - network-backend
+      - app-network
+
   api:
-    build: ./backend
+    build:
+      context: ./backend
+    restart: unless-stopped
+    init: true
+    environment:
+      PORT: "3001"
+      APP_USERNAME: "${APP_USERNAME:?Set APP_USERNAME in the project .env file}"
+      APP_PASSWORD: "${APP_PASSWORD:?Set APP_PASSWORD in the project .env file}"
+      JWT_SECRET: "${JWT_SECRET:?Set JWT_SECRET in the project .env file}"
+      FRONTEND_ORIGINS: "${FRONTEND_ORIGINS:-http://localhost:3000}"
+      MONGO_URI: "mongodb://${MONGO_ROOT_USERNAME:?Set MONGO_ROOT_USERNAME in the project .env file}:${MONGO_ROOT_PASSWORD:?Set MONGO_ROOT_PASSWORD in the project .env file}@mongo:27017/todos?authSource=admin"
     depends_on:
-      - mongo
-    ports:
-      - "3001:3001"
-    networks: 
-     - network-backend
-  
+      mongo:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3001/api/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+    networks:
+      - app-network
+
   mongo:
-    image: mongo
-    restart: always
-    volumes: 
+    image: mongo:9.0.4
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: "${MONGO_ROOT_USERNAME:?Set MONGO_ROOT_USERNAME in the project .env file}"
+      MONGO_INITDB_ROOT_PASSWORD: "${MONGO_ROOT_PASSWORD:?Set MONGO_ROOT_PASSWORD in the project .env file}"
+    volumes:
       - mongodb_data:/data/db
-    environment: 
-      MONGODB_INITDB_ROOT_USERNAME: username
-      MONGODB_INITDB_ROOT_PASSWORD: password
-    # uncomment following lines to access db locally
-    # ports:
-    #   - 27017:27017
-    networks: 
-     - network-backend
+    healthcheck:
+      test:
+        - CMD
+        - mongosh
+        - --quiet
+        - --eval
+        - "db.adminCommand('ping').ok"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - app-network
 
 networks:
-  network-backend:
+  app-network:
+    driver: bridge
 
-volumes: 
+volumes:
   mongodb_data:

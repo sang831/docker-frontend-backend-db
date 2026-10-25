@@ -3,6 +3,11 @@
 *.iml
 node_modules
 npm-debug.log
+.env
+.env.*
+!.env.example
+!.env.*.example
 *.sublime-project
 *.sublime-workspace
 .vs
+.local-backups/

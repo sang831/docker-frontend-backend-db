@@ -96,7 +96,18 @@ jobs:
             --exclude='**/build/' \
             -e "ssh -i $RUNNER_TEMP/deploy-ssh/id_ed25519 -p $DEPLOY_PORT -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$RUNNER_TEMP/deploy-ssh/known_hosts" \
             ./ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
-
+      - name: Generate .env file on server
+        env:
+          APP_USERNAME: ${{ secrets.APP_USERNAME }}
+          MONGO_URI: ${{ secrets.MONGO_URI }}
+        run: |
+          ssh -p "$DEPLOY_PORT" \
+              -i "$RUNNER_TEMP/deploy-ssh/id_ed25519" \
+              -o StrictHostKeyChecking=no \
+              "$DEPLOY_USER@$DEPLOY_HOST" "cat << 'EOF' > /opt/todo-app/.env
+          APP_USERNAME=$APP_USERNAME
+          MONGO_URI=$MONGO_URI
+          EOF"
       - name: Deploy and verify health
         env:
           DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}

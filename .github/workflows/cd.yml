@@ -77,9 +77,9 @@ jobs:
           chmod 600 "$RUNNER_TEMP/deploy-ssh/id_ed25519" "$RUNNER_TEMP/deploy-ssh/known_hosts"
 
           # 2. Thêm -vvv vào lệnh ssh dưới đây để bật chế độ debug siêu chi tiết
-          SSH_PORT="${{ vars.DEPLOY_PORT:-22 }}"
+          SSH_PORT="${{ vars.DEPLOY_PORT || 22 }}"
           
-          echo "Bắt đầu kết nối tới ${{ vars.DEPLOY_USER }}@${{ vars.DEPLOY_HOST }}:${{ vars.DEPLOY_PORT:-22 }} với chế độ debug (-vvv)..."
+          echo "Bắt đầu kết nối tới ${{ vars.DEPLOY_USER }}@${{ vars.DEPLOY_HOST }}:${{ vars.DEPLOY_PORT || 22 }} với chế độ debug (-vvv)..."
 
           ssh -vvv -p "$SSH_PORT" \
               -i "$RUNNER_TEMP/deploy-ssh/id_ed25519" \

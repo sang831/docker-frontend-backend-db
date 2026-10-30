@@ -98,8 +98,11 @@ jobs:
             ./ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
       - name: Generate .env file on server
         env:
-          APP_USERNAME: ${{ secrets.APP_USERNAME }}
-          MONGO_URI: ${{ secrets.MONGO_URI }}
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ vars.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+          APP_USERNAME: ${{ vars.APP_USERNAME }}  # Hoặc vars tùy thuộc bạn lưu ở đâu trên GitHub
+          MONGO_URI: ${{ vars.MONGO_ROOT_USERNAME }}        # Hoặc vars tùy thuộc bạn lưu ở đâu trên GitHub
         run: |
           ssh -p "$DEPLOY_PORT" \
               -i "$RUNNER_TEMP/deploy-ssh/id_ed25519" \

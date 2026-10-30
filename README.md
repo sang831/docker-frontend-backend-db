@@ -24,3 +24,33 @@ Compose builds the frontend into static files served by Nginx. Nginx forwards `/
 ## Checks
 
 Run `npm test` and `npm run build` in `frontend`, and `npm test` in `backend`.
+
+## Continuous integration
+
+GitHub Actions runs the backend and frontend tests, builds the frontend, validates the Compose configuration, and builds the Docker images on each push and pull request. It can also be started manually from the Actions tab. CI uses temporary test credentials only; configure production secrets on the Linux server during the CD step.
+
+## Continuous deployment to Linux
+
+The `CD` workflow deploys only after the `CI` workflow succeeds for a push to `master`. It checks out that exact tested commit, copies the application to the server over SSH, runs `docker compose up --build -d`, and waits for `http://127.0.0.1:3000/api/health` to report a healthy API and database. The transfer preserves the server's root `.env`; it does not put production credentials in GitHub or overwrite that file. Failed health checks fail the deployment job and print recent Compose logs. To roll back, revert the bad commit on `master`; CI and CD will deploy the reverted version.
+
+### Prepare the Linux server
+
+1. Install Docker Engine with the Compose plugin, `rsync`, and `curl`. Make sure the deploy account can run Docker commands and can write to the deployment directory.
+2. Create a dedicated deployment directory, for example `/opt/todo-app`, and create its production `.env` using `.env.example` as a reference. Set strong production credentials and keep the file on the server. The directory and `.env` must already exist before the first CD run.
+3. Allow inbound SSH from GitHub-hosted runners (or use a self-hosted runner if your firewall restricts SSH by source IP). Keep the app behind a host reverse proxy that forwards to `127.0.0.1:3000`; expose HTTPS, not the MongoDB or API ports.
+4. Create a dedicated SSH key for deployment. Install only its public key in the server deploy account's `authorized_keys`. Verify the server host-key fingerprint through a trusted channel before adding the matching `ssh-keyscan -H -p 22 SERVER_HOST` output to GitHub.
+
+### Configure GitHub
+
+Create a GitHub Actions environment named `production` in repository settings. Add these environment secrets and variables; never paste private keys or `.env` values into the workflow file:
+
+| Kind | Name | Value |
+| --- | --- | --- |
+| Secret | `DEPLOY_SSH_PRIVATE_KEY` | Private half of the dedicated deploy key |
+| Secret | `DEPLOY_KNOWN_HOSTS` | Verified SSH host-key line(s) for the server |
+| Variable | `DEPLOY_HOST` | Server hostname or IPv4 address |
+| Variable | `DEPLOY_USER` | Linux deploy account |
+| Variable | `DEPLOY_PORT` | SSH port; defaults to `22` if blank |
+| Variable | `DEPLOY_PATH` | Absolute deployment directory, e.g. `/opt/todo-app` |
+
+Restrict the `production` environment to the `master` branch. You can also add required reviewers so a successful CI run waits for approval before deploying. Once these values and the server directory are ready, pushing a commit to `master` starts CI; CD follows only when CI succeeds. The `CD` job does not run for pull requests or failed CI runs.

@@ -30,7 +30,7 @@ describe("application sign-in", () => {
     expect(await screen.findByRole("heading", { name: "Todos" })).toBeInTheDocument();
     expect(api.post).toHaveBeenCalledWith("/auth/login", {
       username: "todo-admin",
-      password: "a-secure-tes t-password",
+      password: "a-secure-test-password",
     });
     await waitFor(() => expect(api.get).toHaveBeenCalledWith("/todos"));
   });

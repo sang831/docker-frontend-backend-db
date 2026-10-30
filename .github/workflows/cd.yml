@@ -34,7 +34,7 @@ jobs:
           DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
           DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-          TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE }}
+          TAILSCALE: ${{ secrets.TAILSCALE }}
         run: |
           set -Eeuo pipefail
           for name in DEPLOY_HOST DEPLOY_USER DEPLOY_PATH DEPLOY_SSH_PRIVATE_KEY DEPLOY_KNOWN_HOSTS TAILSCALE; do

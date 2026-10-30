@@ -78,7 +78,12 @@ jobs:
           DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
         run: |
           set -Eeuo pipefail
-          DEPLOY_PORT="${DEPLOY_PORT:-22}"
+          
+          # 1. Tự động quét và thêm host key của IP Tailscale vào known_hosts để tránh lỗi strict checking
+          mkdir -p "$RUNNER_TEMP/deploy-ssh"
+          ssh-keyscan -H -p "$DEPLOY_PORT" "$DEPLOY_HOST" >> "$RUNNER_TEMP/deploy-ssh/known_hosts"
+          
+          # 2. Giữ nguyên lệnh rsync hiện tại của bạn
           rsync -az --delete \
             --filter='P /.env' \
             --filter='P /backend/.env' \

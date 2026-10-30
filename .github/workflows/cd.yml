@@ -60,24 +60,35 @@ jobs:
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$RUNNER_TEMP/deploy-ssh/known_hosts"
           chmod 600 "$RUNNER_TEMP/deploy-ssh/id_ed25519" "$RUNNER_TEMP/deploy-ssh/known_hosts"
 
-      - name: Verify server prerequisites
+      - name: Configure SSH & Connect
         env:
+          DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
           DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
           DEPLOY_USER: ${{ vars.DEPLOY_USER }}
           DEPLOY_PORT: ${{ vars.DEPLOY_PORT }}
-          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
         run: |
           set -Eeuo pipefail
-          DEPLOY_PORT="${DEPLOY_PORT:-22}"
-          ssh \
-            -i "$RUNNER_TEMP/deploy-ssh/id_ed25519" \
-            -p "$DEPLOY_PORT" \
-            -o BatchMode=yes \
-            -o StrictHostKeyChecking=yes \
-            -o UserKnownHostsFile="$RUNNER_TEMP/deploy-ssh/known_hosts" \
-            "$DEPLOY_USER@$DEPLOY_HOST" \
-            "test -d '$DEPLOY_PATH' && test -f '$DEPLOY_PATH/.env' && command -v docker >/dev/null && command -v rsync >/dev/null && docker compose version >/dev/null && docker ps >/dev/null"
+          
+          # 1. Tạo file khóa tạm thời (phần bạn đang có)
+          install -m 700 -d "$RUNNER_TEMP/deploy-ssh"
+          printf '%s\n' "$DEPLOY_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/deploy-ssh/id_ed25519"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$RUNNER_TEMP/deploy-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/deploy-ssh/id_ed25519" "$RUNNER_TEMP/deploy-ssh/known_hosts"
 
+          # 2. Thêm -vvv vào lệnh ssh dưới đây để bật chế độ debug siêu chi tiết
+          SSH_PORT="${{ vars.DEPLOY_PORT:-22 }}"
+          
+          echo "Bắt đầu kết nối tới ${{ vars.DEPLOY_USER }}@${{ vars.DEPLOY_HOST }}:${{ vars.DEPLOY_PORT:-22 }} với chế độ debug (-vvv)..."
+
+          ssh -vvv -p "$SSH_PORT" \
+              -i "$RUNNER_TEMP/deploy-ssh/id_ed25519" \
+              -o UserKnownHostsFile="$RUNNER_TEMP/deploy-ssh/known_hosts" \
+              "${{ vars.DEPLOY_USER }}@${{ vars.DEPLOY_HOST }}" << 'EOF'
+              
+              echo "Đã kết nối thành công vào server!"
+              # Các lệnh deploy của bạn sẽ viết ở đây
+          EOF
       - name: Copy tested source to server
         env:
           DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}

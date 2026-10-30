@@ -34,9 +34,10 @@ jobs:
           DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
           DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
         run: |
           set -Eeuo pipefail
-          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_PATH DEPLOY_SSH_PRIVATE_KEY DEPLOY_KNOWN_HOSTS; do
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_PATH DEPLOY_SSH_PRIVATE_KEY DEPLOY_KNOWN_HOSTS TAILSCALE_AUTHKEY; do
             if [[ -z "${!name:-}" ]]; then
               echo "Missing production environment setting: $name" >&2
               exit 1
@@ -49,6 +50,12 @@ jobs:
           [[ "$DEPLOY_PATH" =~ ^/[A-Za-z0-9._/-]+$ && "$DEPLOY_PATH" != *..* ]] || { echo "DEPLOY_PATH must be an absolute path without spaces or '..'." >&2; exit 1; }
           [[ "$DEPLOY_PORT" =~ ^[0-9]+$ ]] && (( DEPLOY_PORT >= 1 && DEPLOY_PORT <= 65535 )) || { echo "DEPLOY_PORT must be between 1 and 65535." >&2; exit 1; }
 
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v4
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          ping: ${{ vars.DEPLOY_HOST }}
+
       - name: Configure SSH
         env:
           DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
@@ -60,35 +67,6 @@ jobs:
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$RUNNER_TEMP/deploy-ssh/known_hosts"
           chmod 600 "$RUNNER_TEMP/deploy-ssh/id_ed25519" "$RUNNER_TEMP/deploy-ssh/known_hosts"
 
-      - name: Configure SSH & Connect
-        env:
-          DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
-          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
-          DEPLOY_PORT: ${{ vars.DEPLOY_PORT }}
-        run: |
-          set -Eeuo pipefail
-          
-          # 1. Tạo file khóa tạm thời (phần bạn đang có)
-          install -m 700 -d "$RUNNER_TEMP/deploy-ssh"
-          printf '%s\n' "$DEPLOY_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/deploy-ssh/id_ed25519"
-          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$RUNNER_TEMP/deploy-ssh/known_hosts"
-          chmod 600 "$RUNNER_TEMP/deploy-ssh/id_ed25519" "$RUNNER_TEMP/deploy-ssh/known_hosts"
-
-          # 2. Thêm -vvv vào lệnh ssh dưới đây để bật chế độ debug siêu chi tiết
-          SSH_PORT="${{ vars.DEPLOY_PORT || 22 }}"
-          
-          echo "Bắt đầu kết nối tới ${{ vars.DEPLOY_USER }}@${{ vars.DEPLOY_HOST }}:${{ vars.DEPLOY_PORT || 22 }} với chế độ debug (-vvv)..."
-
-          ssh -vvv -p "$SSH_PORT" \
-              -i "$RUNNER_TEMP/deploy-ssh/id_ed25519" \
-              -o UserKnownHostsFile="$RUNNER_TEMP/deploy-ssh/known_hosts" \
-              "${{ vars.DEPLOY_USER }}@${{ vars.DEPLOY_HOST }}" << 'EOF'
-              
-              echo "Đã kết nối thành công vào server!"
-              # Các lệnh deploy của bạn sẽ viết ở đây
-          EOF
       - name: Copy tested source to server
         env:
           DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}

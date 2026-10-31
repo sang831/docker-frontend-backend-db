@@ -110,6 +110,7 @@ jobs:
               -o StrictHostKeyChecking=no \
               "$DEPLOY_USER@$DEPLOY_HOST" "cat << 'EOF' > /opt/todo-app/.env
           APP_USERNAME=$APP_USERNAME
+          APP_PASSWORD=$APP_PASSWORD
           MONGO_URI=$MONGO_URI
           EOF"
       - name: Deploy and verify health

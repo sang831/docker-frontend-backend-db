@@ -102,6 +102,7 @@ jobs:
           DEPLOY_PORT: ${{ vars.DEPLOY_PORT }}
           DEPLOY_USER: ${{ vars.DEPLOY_USER }}
           APP_USERNAME: ${{ vars.APP_USERNAME }}  # Hoặc vars tùy thuộc bạn lưu ở đâu trên GitHub
+          APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
           MONGO_URI: ${{ vars.MONGO_ROOT_USERNAME }}        # Hoặc vars tùy thuộc bạn lưu ở đâu trên GitHub
         run: |
           ssh -p "$DEPLOY_PORT" \

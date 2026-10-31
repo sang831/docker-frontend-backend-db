@@ -103,7 +103,9 @@ jobs:
           DEPLOY_USER: ${{ vars.DEPLOY_USER }}
           APP_USERNAME: ${{ vars.APP_USERNAME }}  # Hoặc vars tùy thuộc bạn lưu ở đâu trên GitHub
           APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
           MONGO_URI: ${{ vars.MONGO_ROOT_USERNAME }}        # Hoặc vars tùy thuộc bạn lưu ở đâu trên GitHub
+          MONGO_ROOT_PASSWORD: ${{ secrets.MONGO_ROOT_PASSWORD }}
         run: |
           ssh -p "$DEPLOY_PORT" \
               -i "$RUNNER_TEMP/deploy-ssh/id_ed25519" \
@@ -111,7 +113,9 @@ jobs:
               "$DEPLOY_USER@$DEPLOY_HOST" "cat << 'EOF' > /opt/todo-app/.env
           APP_USERNAME=$APP_USERNAME
           APP_PASSWORD=$APP_PASSWORD
+          JWT_SECRET=$JWT_SECRET
           MONGO_URI=$MONGO_URI
+          MONGO_ROOT_PASSWORD=$MONGO_ROOT_PASSWORD
           EOF"
       - name: Deploy and verify health
         env:

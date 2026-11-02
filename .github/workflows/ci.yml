@@ -19,10 +19,10 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
@@ -59,11 +59,48 @@ jobs:
           MONGO_ROOT_PASSWORD: ci-only-mongo-password
         run: docker compose config --quiet
 
-      - name: Build Docker images
+      - name: Build and smoke-test Docker Compose
         env:
           APP_USERNAME: ci-user
           APP_PASSWORD: ci-only-password-not-for-deployment
           JWT_SECRET: ci-only-signing-secret-not-for-deployment-0123456789
           MONGO_ROOT_USERNAME: ci-root
           MONGO_ROOT_PASSWORD: ci-only-mongo-password
-        run: docker compose build
+        run: |
+          set -Eeuo pipefail
+          cleanup() {
+            status=$?
+            trap - EXIT
+            docker compose down --volumes --remove-orphans || true
+            exit "$status"
+          }
+          trap cleanup EXIT
+
+          docker compose up --build --detach --remove-orphans
+          for attempt in {1..60}; do
+            if health="$(curl --fail --silent --show-error --max-time 5 http://127.0.0.1:3000/api/health 2>/dev/null)" && [[ "$health" == *'"status":"ok"'* ]]; then
+              break
+            fi
+            if (( attempt == 60 )); then
+              echo "Compose health check failed." >&2
+              docker compose ps >&2
+              docker compose logs --tail=100 web api mongo >&2
+              exit 1
+            fi
+            sleep 2
+          done
+
+          curl --fail --silent --show-error --max-time 5 http://127.0.0.1:3000/ --output /dev/null
+          cookies="$RUNNER_TEMP/ci-cookies.txt"
+          login_payload="$(jq -cn --arg username "$APP_USERNAME" --arg password "$APP_PASSWORD" '{username: $username, password: $password}')"
+          login_response="$(curl --fail --silent --show-error --max-time 5 \
+            --cookie-jar "$cookies" \
+            --header 'Content-Type: application/json' \
+            --data "$login_payload" \
+            http://127.0.0.1:3000/api/auth/login)"
+          jq -e '.authenticated == true' <<< "$login_response" >/dev/null
+
+          session_response="$(curl --fail --silent --show-error --max-time 5 \
+            --cookie "$cookies" \
+            http://127.0.0.1:3000/api/auth/session)"
+          jq -e '.authenticated == true and .username == "ci-user"' <<< "$session_response" >/dev/null

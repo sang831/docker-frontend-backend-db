@@ -15,23 +15,25 @@ concurrency:
 
 jobs:
   deploy:
-    if: github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success'
+    if: github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'master' && github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     environment: production
+    env:
+      DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+      DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
 
     steps:
       - name: Check out the tested commit
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           persist-credentials: false
 
       - name: Validate deployment settings
         env:
-          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
-          DEPLOY_PORT: ${{ vars.DEPLOY_PORT }}
-          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
           DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
           TAILSCALE: ${{ secrets.TAILSCALE }}
@@ -44,14 +46,13 @@ jobs:
             fi
           done
 
-          DEPLOY_PORT="${DEPLOY_PORT:-22}"
           [[ "$DEPLOY_HOST" =~ ^[A-Za-z0-9.-]+$ ]] || { echo "DEPLOY_HOST must be a hostname or IPv4 address." >&2; exit 1; }
           [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*\$?$ ]] || { echo "DEPLOY_USER is not a valid Linux account name." >&2; exit 1; }
-          [[ "$DEPLOY_PATH" =~ ^/[A-Za-z0-9._/-]+$ && "$DEPLOY_PATH" != *..* ]] || { echo "DEPLOY_PATH must be an absolute path without spaces or '..'." >&2; exit 1; }
+          [[ "$DEPLOY_PATH" =~ ^/(opt|srv)/[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$ && "$DEPLOY_PATH" != *..* ]] || { echo "DEPLOY_PATH must be a dedicated subdirectory under /opt or /srv, without spaces or '..'." >&2; exit 1; }
           [[ "$DEPLOY_PORT" =~ ^[0-9]+$ ]] && (( DEPLOY_PORT >= 1 && DEPLOY_PORT <= 65535 )) || { echo "DEPLOY_PORT must be between 1 and 65535." >&2; exit 1; }
 
       - name: Connect to Tailscale
-        uses: tailscale/github-action@v4
+        uses: tailscale/github-action@064b10558093f38325e838ddea35486bdc6b1d5c # v4.4.0
         with:
           authkey: ${{ secrets.TAILSCALE }}
           ping: ${{ vars.DEPLOY_HOST }}
@@ -66,24 +67,35 @@ jobs:
           printf '%s\n' "$DEPLOY_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/deploy-ssh/id_ed25519"
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$RUNNER_TEMP/deploy-ssh/known_hosts"
           chmod 600 "$RUNNER_TEMP/deploy-ssh/id_ed25519" "$RUNNER_TEMP/deploy-ssh/known_hosts"
-      - name: Add Tailscale host to known_hosts
-        run: |
-          mkdir -p ~/.ssh
-          ssh-keyscan -H 100.124.36.49 >> ~/.ssh/known_hosts
-      - name: Copy tested source to server
-        env:
-          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
-          DEPLOY_PORT: ${{ vars.DEPLOY_PORT }}
-          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+
+      - name: Verify server prerequisites
         run: |
           set -Eeuo pipefail
-          
-          # 1. Tự động quét và thêm host key của IP Tailscale vào known_hosts để tránh lỗi strict checking
-          mkdir -p "$RUNNER_TEMP/deploy-ssh"
-          ssh-keyscan -H -p "$DEPLOY_PORT" "$DEPLOY_HOST" >> "$RUNNER_TEMP/deploy-ssh/known_hosts"
-          
-          # 2. Giữ nguyên lệnh rsync hiện tại của bạn
+          DEPLOY_PATH_B64="$(printf '%s' "$DEPLOY_PATH" | base64 -w 0)"
+          ssh \
+            -i "$RUNNER_TEMP/deploy-ssh/id_ed25519" \
+            -p "$DEPLOY_PORT" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/deploy-ssh/known_hosts" \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            "DEPLOY_PATH_B64=$DEPLOY_PATH_B64 bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          DEPLOY_PATH="$(printf '%s' "$DEPLOY_PATH_B64" | base64 -d)"
+          test -d "$DEPLOY_PATH"
+          [[ "$(realpath -e -- "$DEPLOY_PATH")" == "$DEPLOY_PATH" ]]
+          test -f "$DEPLOY_PATH/.env"
+          command -v docker >/dev/null
+          command -v rsync >/dev/null
+          command -v curl >/dev/null
+          docker compose version >/dev/null
+          docker ps >/dev/null
+          REMOTE
+
+      - name: Copy tested source to server
+        run: |
+          set -Eeuo pipefail
           rsync -az --delete \
             --filter='P /.env' \
             --filter='P /backend/.env' \
@@ -94,43 +106,18 @@ jobs:
             --exclude='**/node_modules/' \
             --exclude='**/dist/' \
             --exclude='**/build/' \
-            -e "ssh -i $RUNNER_TEMP/deploy-ssh/id_ed25519 -p $DEPLOY_PORT -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$RUNNER_TEMP/deploy-ssh/known_hosts" \
+            -e "ssh -i $RUNNER_TEMP/deploy-ssh/id_ed25519 -p $DEPLOY_PORT -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$RUNNER_TEMP/deploy-ssh/known_hosts" \
             ./ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
-      - name: Generate .env file on server
-        env:
-          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
-          DEPLOY_PORT: ${{ vars.DEPLOY_PORT }}
-          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
-          APP_USERNAME: ${{ vars.APP_USERNAME }}  # Hoặc vars tùy thuộc bạn lưu ở đâu trên GitHub
-          APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
-          JWT_SECRET: ${{ secrets.JWT_SECRET }}
-          MONGO_ROOT_USERNAME: ${{ vars.MONGO_ROOT_USERNAME }}        # Hoặc vars tùy thuộc bạn lưu ở đâu trên GitHub
-          MONGO_ROOT_PASSWORD: ${{ secrets.MONGO_ROOT_PASSWORD }}
-        run: |
-          ssh -p "$DEPLOY_PORT" \
-              -i "$RUNNER_TEMP/deploy-ssh/id_ed25519" \
-              -o StrictHostKeyChecking=no \
-              "$DEPLOY_USER@$DEPLOY_HOST" "cat << 'EOF' > /opt/todo-app/.env
-          APP_USERNAME=$APP_USERNAME
-          APP_PASSWORD=$APP_PASSWORD
-          JWT_SECRET=$JWT_SECRET
-          MONGO_ROOT_USERNAME=$MONGO_ROOT_USERNAME
-          MONGO_ROOT_PASSWORD=$MONGO_ROOT_PASSWORD
-          EOF"
+
       - name: Deploy and verify health
-        env:
-          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
-          DEPLOY_PORT: ${{ vars.DEPLOY_PORT }}
-          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
         run: |
           set -Eeuo pipefail
-          DEPLOY_PORT="${DEPLOY_PORT:-22}"
           DEPLOY_PATH_B64="$(printf '%s' "$DEPLOY_PATH" | base64 -w 0)"
           ssh \
             -i "$RUNNER_TEMP/deploy-ssh/id_ed25519" \
             -p "$DEPLOY_PORT" \
             -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$RUNNER_TEMP/deploy-ssh/known_hosts" \
             "$DEPLOY_USER@$DEPLOY_HOST" \

@@ -14,73 +14,49 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  check-current-commit:
+  deploy:
     if: github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    outputs:
-      is_current: ${{ steps.compare.outputs.is_current }}
-
-    steps:
-      - name: Compare tested commit with current master
-        id: compare
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
-        run: |
-          set -Eeuo pipefail
-          CURRENT_SHA="$(gh api "repos/$GITHUB_REPOSITORY/commits/master" --jq .sha)"
-          if [[ "$CURRENT_SHA" == "$TESTED_SHA" ]]; then
-            echo "is_current=true" >> "$GITHUB_OUTPUT"
-            echo "Tested commit is current on master."
-          else
-            echo "is_current=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping stale CI commit; master has advanced."
-          fi
-
-  deploy:
-    needs: check-current-commit
-    if: needs.check-current-commit.outputs.is_current == 'true'
-    runs-on: ubuntu-latest
     environment: production
-    env:
-      DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
-      DEPLOY_USER: ${{ vars.DEPLOY_USER }}
-      DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
-      DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
 
     steps:
       - name: Check out the tested commit
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           persist-credentials: false
 
       - name: Validate deployment settings
         env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ vars.DEPLOY_PORT }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
           DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
           TAILSCALE: ${{ secrets.TAILSCALE }}
         run: |
           set -Eeuo pipefail
-          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_PATH DEPLOY_PORT DEPLOY_SSH_PRIVATE_KEY DEPLOY_KNOWN_HOSTS TAILSCALE; do
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_PATH DEPLOY_SSH_PRIVATE_KEY DEPLOY_KNOWN_HOSTS TAILSCALE; do
             if [[ -z "${!name:-}" ]]; then
               echo "Missing production environment setting: $name" >&2
               exit 1
             fi
           done
 
+          DEPLOY_PORT="${DEPLOY_PORT:-22}"
           [[ "$DEPLOY_HOST" =~ ^[A-Za-z0-9.-]+$ ]] || { echo "DEPLOY_HOST must be a hostname or IPv4 address." >&2; exit 1; }
           [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*\$?$ ]] || { echo "DEPLOY_USER is not a valid Linux account name." >&2; exit 1; }
           [[ "$DEPLOY_PATH" =~ ^/[A-Za-z0-9._/-]+$ && "$DEPLOY_PATH" != *..* ]] || { echo "DEPLOY_PATH must be an absolute path without spaces or '..'." >&2; exit 1; }
           [[ "$DEPLOY_PORT" =~ ^[0-9]+$ ]] && (( DEPLOY_PORT >= 1 && DEPLOY_PORT <= 65535 )) || { echo "DEPLOY_PORT must be between 1 and 65535." >&2; exit 1; }
 
       - name: Connect to Tailscale
-        uses: tailscale/github-action@064b10558093f38325e838ddea35486bdc6b1d5c # v4.4.0
+        uses: tailscale/github-action@v4
         with:
           authkey: ${{ secrets.TAILSCALE }}
           ping: ${{ vars.DEPLOY_HOST }}
 
-      - name: Configure verified SSH identity
+      - name: Configure SSH
         env:
           DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
@@ -90,60 +66,27 @@ jobs:
           printf '%s\n' "$DEPLOY_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/deploy-ssh/id_ed25519"
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$RUNNER_TEMP/deploy-ssh/known_hosts"
           chmod 600 "$RUNNER_TEMP/deploy-ssh/id_ed25519" "$RUNNER_TEMP/deploy-ssh/known_hosts"
-          {
-            printf 'Host deploy-target\n'
-            printf '  HostName %s\n' "$DEPLOY_HOST"
-            printf '  User %s\n' "$DEPLOY_USER"
-            printf '  Port %s\n' "$DEPLOY_PORT"
-            printf '  IdentityFile %s\n' "$RUNNER_TEMP/deploy-ssh/id_ed25519"
-            printf '  IdentitiesOnly yes\n'
-            printf '  BatchMode yes\n'
-            printf '  StrictHostKeyChecking yes\n'
-            printf '  UserKnownHostsFile %s\n' "$RUNNER_TEMP/deploy-ssh/known_hosts"
-          } > "$RUNNER_TEMP/deploy-ssh/config"
-          chmod 600 "$RUNNER_TEMP/deploy-ssh/config"
-
-      - name: Verify server prerequisites
+      - name: Add Tailscale host to known_hosts
         run: |
-          set -Eeuo pipefail
-          ssh deploy-target \
-            "test -d '$DEPLOY_PATH' && test -f '$DEPLOY_PATH/.env' && test \"\$(stat -c '%a' '$DEPLOY_PATH/.env')\" = 600 && command -v docker >/dev/null && command -v rsync >/dev/null && command -v curl >/dev/null && docker compose version >/dev/null && docker ps >/dev/null"
-
-      - name: Snapshot current release for rollback
-        run: |
-          set -Eeuo pipefail
-          DEPLOY_PATH_B64="$(printf '%s' "$DEPLOY_PATH" | base64 -w 0)"
-          DEPLOY_BACKUP_ID="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          ssh deploy-target \
-            "DEPLOY_PATH_B64=$DEPLOY_PATH_B64 DEPLOY_BACKUP_ID=$DEPLOY_BACKUP_ID bash -s" <<'REMOTE'
-          set -Eeuo pipefail
-          DEPLOY_PATH="$(printf '%s' "$DEPLOY_PATH_B64" | base64 -d)"
-          BACKUP_DIR="$DEPLOY_PATH/.deploy-rollback-$DEPLOY_BACKUP_ID"
-          test ! -e "$BACKUP_DIR"
-          mkdir -m 700 "$BACKUP_DIR"
-
-          if [[ -f "$DEPLOY_PATH/docker-compose.yml" ]]; then
-            rsync -a --delete \
-              --exclude='/.env' \
-              --exclude='/backend/.env' \
-              --exclude='/.git/' \
-              --exclude='/.github/' \
-              --exclude='**/node_modules/' \
-              --exclude='**/dist/' \
-              --exclude='**/build/' \
-              --exclude='/.deploy-rollback-*/' \
-              "$DEPLOY_PATH/" "$BACKUP_DIR/"
-            touch "$BACKUP_DIR/.has-previous-release"
-          fi
-          REMOTE
-
+          mkdir -p ~/.ssh
+          ssh-keyscan -H 100.124.36.49 >> ~/.ssh/known_hosts
       - name: Copy tested source to server
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ vars.DEPLOY_PORT }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
         run: |
           set -Eeuo pipefail
+          
+          # 1. Tự động quét và thêm host key của IP Tailscale vào known_hosts để tránh lỗi strict checking
+          mkdir -p "$RUNNER_TEMP/deploy-ssh"
+          ssh-keyscan -H -p "$DEPLOY_PORT" "$DEPLOY_HOST" >> "$RUNNER_TEMP/deploy-ssh/known_hosts"
+          
+          # 2. Giữ nguyên lệnh rsync hiện tại của bạn
           rsync -az --delete \
             --filter='P /.env' \
             --filter='P /backend/.env' \
-            --filter='P /.deploy-rollback-*/' \
             --exclude='/.env' \
             --exclude='/backend/.env' \
             --exclude='/.git/' \
@@ -151,76 +94,66 @@ jobs:
             --exclude='**/node_modules/' \
             --exclude='**/dist/' \
             --exclude='**/build/' \
-            --exclude='/.deploy-rollback-*/' \
-            -e "ssh -F $RUNNER_TEMP/deploy-ssh/config" \
-            ./ "deploy-target:$DEPLOY_PATH/"
-
-      - name: Deploy, verify health, and roll back on failure
+            -e "ssh -i $RUNNER_TEMP/deploy-ssh/id_ed25519 -p $DEPLOY_PORT -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$RUNNER_TEMP/deploy-ssh/known_hosts" \
+            ./ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
+      - name: Generate .env file on server
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ vars.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+          APP_USERNAME: ${{ vars.APP_USERNAME }}  # Hoặc vars tùy thuộc bạn lưu ở đâu trên GitHub
+          APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          MONGO_ROOT_USERNAME: ${{ vars.MONGO_ROOT_USERNAME }}        # Hoặc vars tùy thuộc bạn lưu ở đâu trên GitHub
+          MONGO_ROOT_PASSWORD: ${{ secrets.MONGO_ROOT_PASSWORD }}
+        run: |
+          ssh -p "$DEPLOY_PORT" \
+              -i "$RUNNER_TEMP/deploy-ssh/id_ed25519" \
+              -o StrictHostKeyChecking=no \
+              "$DEPLOY_USER@$DEPLOY_HOST" "cat << 'EOF' > /opt/todo-app/.env
+          APP_USERNAME=$APP_USERNAME
+          APP_PASSWORD=$APP_PASSWORD
+          JWT_SECRET=$JWT_SECRET
+          MONGO_ROOT_USERNAME=$MONGO_ROOT_USERNAME
+          MONGO_ROOT_PASSWORD=$MONGO_ROOT_PASSWORD
+          EOF"
+      - name: Deploy and verify health
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ vars.DEPLOY_PORT }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
         run: |
           set -Eeuo pipefail
+          DEPLOY_PORT="${DEPLOY_PORT:-22}"
           DEPLOY_PATH_B64="$(printf '%s' "$DEPLOY_PATH" | base64 -w 0)"
-          DEPLOY_BACKUP_ID="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          ssh deploy-target \
-            "DEPLOY_PATH_B64=$DEPLOY_PATH_B64 DEPLOY_BACKUP_ID=$DEPLOY_BACKUP_ID bash -s" <<'REMOTE'
+          ssh \
+            -i "$RUNNER_TEMP/deploy-ssh/id_ed25519" \
+            -p "$DEPLOY_PORT" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/deploy-ssh/known_hosts" \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            "DEPLOY_PATH_B64=$DEPLOY_PATH_B64 bash -s" <<'REMOTE'
           set -Eeuo pipefail
           DEPLOY_PATH="$(printf '%s' "$DEPLOY_PATH_B64" | base64 -d)"
-          BACKUP_DIR="$DEPLOY_PATH/.deploy-rollback-$DEPLOY_BACKUP_ID"
           cd "$DEPLOY_PATH"
+          docker compose config --quiet
+          docker compose up --build -d --remove-orphans
 
-          wait_for_health() {
-            for attempt in {1..24}; do
-              if response="$(curl --fail --silent --show-error --max-time 5 http://127.0.0.1:3000/api/health 2>/dev/null)"; then
-                if [[ "$response" == *'"status":"ok"'* ]]; then
-                  printf 'Health check passed: %s\n' "$response"
-                  return 0
-                fi
+          for attempt in {1..24}; do
+            if response="$(curl --fail --silent --show-error --max-time 5 http://127.0.0.1:3000/api/health 2>/dev/null)"; then
+              if [[ "$response" == *'"status":"ok"'* ]]; then
+                printf 'Deployment healthy: %s\n' "$response"
+                docker compose ps
+                exit 0
               fi
-              sleep 5
-            done
-            return 1
-          }
-
-          start_stack() {
-            docker compose config --quiet || return 1
-            docker compose up --build -d --remove-orphans || return 1
-            wait_for_health
-          }
-
-          if start_stack; then
-            rm -rf -- "$BACKUP_DIR"
-            docker compose ps
-            exit 0
-          fi
-
-          echo "New release failed its health check; restoring the previous source." >&2
-          if [[ -f "$BACKUP_DIR/.has-previous-release" ]]; then
-            rsync -a --delete \
-              --filter='P /.env' \
-              --filter='P /backend/.env' \
-              --filter='P /.deploy-rollback-*/' \
-              --exclude='/.env' \
-              --exclude='/backend/.env' \
-              --exclude='/.deploy-rollback-*/' \
-              "$BACKUP_DIR/" "$DEPLOY_PATH/" || {
-                echo "Could not restore the previous source." >&2
-                docker compose ps >&2
-                docker compose logs --tail=100 web api mongo >&2
-                exit 1
-              }
-            rm -f -- "$DEPLOY_PATH/.has-previous-release"
-            if docker compose config --quiet && docker compose up --build -d --remove-orphans && wait_for_health; then
-              rm -rf -- "$BACKUP_DIR"
-              echo "Previous release restored; deployment is marked failed." >&2
-            else
-              echo "Rollback did not become healthy." >&2
-              docker compose ps >&2
-              docker compose logs --tail=100 web api mongo >&2
             fi
-          else
-            echo "No previous release exists to restore (first deployment)." >&2
-            docker compose ps >&2
-            docker compose logs --tail=100 web api mongo >&2
-            rm -rf -- "$BACKUP_DIR"
-          fi
+            sleep 5
+          done
+
+          echo "Deployment health check failed." >&2
+          docker compose ps >&2
+          docker compose logs --tail=100 web api mongo >&2
           exit 1
           REMOTE

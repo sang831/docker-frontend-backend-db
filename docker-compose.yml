@@ -31,7 +31,6 @@ services:
     init: true
     environment:
       PORT: "3001"
-      NODE_ENV: production
       APP_USERNAME: "${APP_USERNAME:?Set APP_USERNAME in the project .env file}"
       APP_PASSWORD: "${APP_PASSWORD:?Set APP_PASSWORD in the project .env file}"
       JWT_SECRET: "${JWT_SECRET:?Set JWT_SECRET in the project .env file}"

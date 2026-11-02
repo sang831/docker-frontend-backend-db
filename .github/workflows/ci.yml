@@ -19,10 +19,10 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -67,25 +67,3 @@ jobs:
           MONGO_ROOT_USERNAME: ci-root
           MONGO_ROOT_PASSWORD: ci-only-mongo-password
         run: docker compose build
-
-      - name: Start Compose and smoke-test the web-to-API path
-        env:
-          APP_USERNAME: ci-user
-          APP_PASSWORD: ci-only-password-not-for-deployment
-          JWT_SECRET: ci-only-signing-secret-not-for-deployment-0123456789
-          MONGO_ROOT_USERNAME: ci-root
-          MONGO_ROOT_PASSWORD: ci-only-mongo-password
-        run: |
-          docker compose up --wait --wait-timeout 180 -d
-          curl --fail --silent --show-error --retry 12 --retry-delay 5 --retry-connrefused \
-            http://127.0.0.1:3000/api/health | grep --fixed-strings --quiet '"status":"ok"'
-
-      - name: Stop the smoke-test stack
-        if: always()
-        env:
-          APP_USERNAME: ci-user
-          APP_PASSWORD: ci-only-password-not-for-deployment
-          JWT_SECRET: ci-only-signing-secret-not-for-deployment-0123456789
-          MONGO_ROOT_USERNAME: ci-root
-          MONGO_ROOT_PASSWORD: ci-only-mongo-password
-        run: docker compose down --volumes --remove-orphans

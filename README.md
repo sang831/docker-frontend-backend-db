@@ -15,15 +15,27 @@ The production frontend defaults to `/api` on the same host. If the API uses a s
 
 ## Run with Docker Compose
 
-1. Copy the project-root `.env.example` to `.env`. Set a password of at least 12 characters for `APP_PASSWORD`, generate a random `JWT_SECRET` of at least 32 characters, and set a strong `MONGO_ROOT_PASSWORD`. Generate a secret with `node -e "console.log(require('node:crypto').randomBytes(48).toString('base64url'))"`.
+1. Copy the project-root `.env.example` to `.env`. Set a password of at least 12 characters for `APP_PASSWORD`, generate a random `JWT_SECRET` of at least 32 characters, set a strong `MONGO_ROOT_PASSWORD`, and set a unique `GRAFANA_ADMIN_PASSWORD`. Generate secrets with `node -e "console.log(require('node:crypto').randomBytes(48).toString('base64url'))"`.
 2. Start the stack with `docker compose up --build -d`.
 3. Open `http://localhost:3000`; the API health endpoint is proxied through `http://localhost:3000/api/health`.
 
-Compose builds the frontend into static files served by Nginx. Nginx forwards `/api` requests to the API over the private Compose network, so the browser does not need to resolve a container hostname or connect to a separately published API port. The current Compose file publishes the web service on host port `3000`; MongoDB and the API stay on the private Compose network. On a server, restrict direct access to port `3000` with the firewall and terminate HTTPS at the host reverse proxy. MongoDB stores data in the `mongodb_data` named volume. `docker compose down` preserves that volume; do not add `--volumes` unless you intend to erase the database. Keep `.env` out of Git.
+Compose builds the frontend into static files served by Nginx. Nginx forwards `/api` requests to the API over the private Compose network, so the browser does not need to resolve a container hostname or connect to a separately published API port. The web service is published on host port `3000`; MongoDB and the API stay on the private Compose network. Prometheus and Grafana collect application endpoint and Linux host metrics. Their host ports (`9090` and `3002` by default) bind to `127.0.0.1` only; access them through an SSH tunnel over Tailscale, and do not expose them to the public Internet. On a server, restrict direct access to port `3000` with the firewall and terminate HTTPS at the host reverse proxy when you configure the domain. MongoDB, Prometheus, and Grafana data use named volumes. `docker compose down` preserves these volumes; do not add `--volumes` unless you intend to erase the stored data. Keep `.env` out of Git.
 
 ## Checks
 
 Run `npm test` and `npm run build` in `frontend`, and `npm test` in `backend`.
+
+## Monitoring
+
+Prometheus probes the web health endpoint and API health endpoint every 30 seconds and records Linux CPU, memory, and root disk metrics through node-exporter. Prometheus evaluates alerts for unavailable endpoints and sustained high CPU, low memory, or low disk space. Grafana is preconfigured to use Prometheus. The alert rules are visible in Prometheus; notification delivery (for example, email or Telegram) still needs a receiver configured.
+
+Set `GRAFANA_ADMIN_PASSWORD` in the server `.env` before deploying the monitoring stack. Since CD preserves the server `.env`, add this value there before the next push/deployment; it is not a GitHub secret. Grafana listens on `127.0.0.1:3002` and Prometheus on `127.0.0.1:9090` by default, so neither is public. Grafana applies this password when its data volume is first initialized; change it later through Grafana if needed. From a device connected to the same Tailscale network, open an SSH tunnel to the server:
+
+```sh
+ssh -L 3002:127.0.0.1:3002 -L 9090:127.0.0.1:9090 deploy-user@SERVER_TAILSCALE_IP
+```
+
+Then open `http://localhost:3002` and sign in as `admin` with the password from the server `.env`. Prometheus is available at `http://localhost:9090`. Keep the tunnel running while using the dashboards. The monitoring UI can later be placed behind a private Tailscale service; public domain setup remains a separate final step.
 
 ## Continuous integration
 
@@ -36,7 +48,7 @@ The `CD` workflow deploys only after the `CI` workflow succeeds for a push to `m
 ### Prepare the Linux server
 
 1. Install Docker Engine with the Compose plugin, `rsync`, `curl`, and Tailscale. Join the server to your tailnet. Make sure the deploy account can run Docker commands and write to the deployment directory.
-2. Create a dedicated deployment directory under `/opt` or `/srv`, for example `/opt/todo-app`, and create its production `.env` using `.env.example` as a reference. Set strong production credentials, run `chmod 600 .env`, and keep this file on the server. The directory and `.env` must exist before the first CD run.
+2. Create a dedicated deployment directory under `/opt` or `/srv`, for example `/opt/todo-app`, and create its production `.env` using `.env.example` as a reference. Set strong production credentials, including a unique `GRAFANA_ADMIN_PASSWORD`, run `chmod 600 .env`, and keep this file on the server. The directory and `.env` must exist before the first CD run.
 3. Keep the app behind a host reverse proxy that forwards to `127.0.0.1:3000`; allow public HTTPS through the proxy and restrict direct access to host port `3000` with the firewall. Do not publish MongoDB or the API port.
 4. Create a dedicated SSH key for deployment. Install only its public key in the server deploy account's `authorized_keys`. Verify the SSH host-key fingerprint through a trusted channel. Put the matching `known_hosts` entry for the exact `DEPLOY_HOST` and `DEPLOY_PORT` in GitHub; for a non-default port, the entry must use `[DEPLOY_HOST]:DEPLOY_PORT`. Do not generate and trust host keys inside the deploy workflow.
 

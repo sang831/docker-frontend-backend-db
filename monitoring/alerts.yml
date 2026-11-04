@@ -1,0 +1,49 @@
+groups:
+  - name: application
+    rules:
+      - alert: ApplicationEndpointUnavailable
+        expr: probe_success{job="app-http"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "An application endpoint is unavailable"
+          description: "The HTTP probe for {{ $labels.instance }} has failed for at least two minutes."
+
+      - alert: MonitoringTargetUnavailable
+        expr: up{job=~"linux-server|blackbox-exporter|prometheus"} == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "A monitoring target is unavailable"
+          description: "Prometheus cannot scrape {{ $labels.instance }}."
+
+  - name: linux-server
+    rules:
+      - alert: HighServerCPU
+        expr: 100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Server CPU usage is high"
+          description: "CPU usage has stayed above 85% for ten minutes."
+
+      - alert: LowServerMemory
+        expr: (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 < 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Server memory is running low"
+          description: "Available memory has stayed below 10% for five minutes."
+
+      - alert: LowServerDiskSpace
+        expr: (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs",mountpoint="/"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs",mountpoint="/"}) * 100 < 10
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Server disk space is running low"
+          description: "Available space on the root filesystem has stayed below 10% for ten minutes."

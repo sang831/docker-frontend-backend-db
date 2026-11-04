@@ -57,6 +57,7 @@ jobs:
           JWT_SECRET: ci-only-signing-secret-not-for-deployment-0123456789
           MONGO_ROOT_USERNAME: ci-root
           MONGO_ROOT_PASSWORD: ci-only-mongo-password
+          GRAFANA_ADMIN_PASSWORD: ci-only-grafana-password
         run: docker compose config --quiet
 
       - name: Build and smoke-test Docker Compose
@@ -66,6 +67,7 @@ jobs:
           JWT_SECRET: ci-only-signing-secret-not-for-deployment-0123456789
           MONGO_ROOT_USERNAME: ci-root
           MONGO_ROOT_PASSWORD: ci-only-mongo-password
+          GRAFANA_ADMIN_PASSWORD: ci-only-grafana-password
         run: |
           set -Eeuo pipefail
           cleanup() {

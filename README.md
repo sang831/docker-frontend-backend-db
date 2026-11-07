@@ -19,7 +19,7 @@ The production frontend defaults to `/api` on the same host. If the API uses a s
 2. Start the stack with `docker compose up --build -d`.
 3. Open `http://localhost:3000`; the API health endpoint is proxied through `http://localhost:3000/api/health`.
 
-Compose builds the frontend into static files served by Nginx. Nginx forwards `/api` requests to the API over the private Compose network, so the browser does not need to resolve a container hostname or connect to a separately published API port. The web service is published on host port `3000`; MongoDB and the API stay on the private Compose network. Prometheus and Grafana collect application endpoint and Linux host metrics. Their host ports (`9090` and `3002` by default) bind to `127.0.0.1` only; access them through an SSH tunnel over Tailscale, and do not expose them to the public Internet. On a server, restrict direct access to port `3000` with the firewall and terminate HTTPS at the host reverse proxy when you configure the domain. MongoDB, Prometheus, and Grafana data use named volumes. `docker compose down` preserves these volumes; do not add `--volumes` unless you intend to erase the stored data. Keep `.env` out of Git.
+Compose builds the frontend into static files served by Nginx. Nginx forwards `/api` requests to the API over the private Compose network, so the browser does not need to resolve a container hostname or connect to a separately published API port. The web service binds to `127.0.0.1:3000` on the host, so only local host services such as Nginx or Tailscale Funnel can reach it. MongoDB and the API stay on the private Compose network. Prometheus and Grafana collect application endpoint and Linux host metrics. Their host ports (`9090` and `3002` by default) also bind to `127.0.0.1` only; access them through an SSH tunnel over Tailscale, and do not expose them to the public Internet. MongoDB, Prometheus, and Grafana data use named volumes. `docker compose down` preserves these volumes; do not add `--volumes` unless you intend to erase the stored data. Keep `.env` out of Git.
 
 ## Checks
 
@@ -37,6 +37,10 @@ ssh -L 3002:127.0.0.1:3002 -L 9090:127.0.0.1:9090 deploy-user@SERVER_TAILSCALE_I
 
 Then open `http://localhost:3002` and sign in as `admin` with the password from the server `.env`. Prometheus is available at `http://localhost:9090`. Keep the tunnel running while using the dashboards. The monitoring UI can later be placed behind a private Tailscale service; public domain setup remains a separate final step.
 
+### Public access with Tailscale Funnel
+
+If the ISP blocks inbound ports `80` and `443`, Tailscale Funnel can publish the app over HTTPS without router port forwarding. Ensure the app responds at `http://127.0.0.1:3000`, enable Funnel for the tailnet, then run `sudo tailscale funnel --bg 3000` on the server and check `sudo tailscale funnel status`. Share the HTTPS `*.ts.net` URL shown by Tailscale. Funnel does not use the DuckDNS hostname; use a DNS zone managed by Cloudflare with Cloudflare Tunnel if a custom domain is required. Do not expose Grafana or Prometheus through Funnel.
+
 ## Continuous integration
 
 GitHub Actions runs backend and frontend tests, builds the frontend, validates the Compose configuration, then builds and starts the full stack with temporary credentials. It checks the web page, API health, login, and session-cookie flow. CI runs on pushes and pull requests and can also be started manually. CI credentials are disposable and are never used for production.
@@ -49,7 +53,7 @@ The `CD` workflow deploys only after the `CI` workflow succeeds for a push to `m
 
 1. Install Docker Engine with the Compose plugin, `rsync`, `curl`, and Tailscale. Join the server to your tailnet. Make sure the deploy account can run Docker commands and write to the deployment directory.
 2. Create a dedicated deployment directory under `/opt` or `/srv`, for example `/opt/todo-app`, and create its production `.env` using `.env.example` as a reference. Set strong production credentials, including a unique `GRAFANA_ADMIN_PASSWORD`, run `chmod 600 .env`, and keep this file on the server. The directory and `.env` must exist before the first CD run.
-3. Keep the app behind a host reverse proxy that forwards to `127.0.0.1:3000`; allow public HTTPS through the proxy and restrict direct access to host port `3000` with the firewall. Do not publish MongoDB or the API port.
+3. The app listens on host loopback port `3000`. Use a host reverse proxy if inbound HTTPS is available, or Tailscale Funnel for a public `*.ts.net` URL when the ISP blocks inbound `80` and `443`. Do not publish MongoDB, the API, Grafana, or Prometheus to the public Internet.
 4. Create a dedicated SSH key for deployment. Install only its public key in the server deploy account's `authorized_keys`. Verify the SSH host-key fingerprint through a trusted channel. Put the matching `known_hosts` entry for the exact `DEPLOY_HOST` and `DEPLOY_PORT` in GitHub; for a non-default port, the entry must use `[DEPLOY_HOST]:DEPLOY_PORT`. Do not generate and trust host keys inside the deploy workflow.
 
 ### Configure GitHub

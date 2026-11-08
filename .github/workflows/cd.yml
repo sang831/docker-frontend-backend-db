@@ -35,11 +35,10 @@ jobs:
       - name: Validate deployment settings
         env:
           DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
-          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
           TAILSCALE: ${{ secrets.TAILSCALE }}
         run: |
           set -Eeuo pipefail
-          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_PATH DEPLOY_SSH_PRIVATE_KEY DEPLOY_KNOWN_HOSTS TAILSCALE; do
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_PATH DEPLOY_SSH_PRIVATE_KEY TAILSCALE; do
             if [[ -z "${!name:-}" ]]; then
               echo "Missing production environment setting: $name" >&2
               exit 1
@@ -60,13 +59,17 @@ jobs:
       - name: Configure SSH
         env:
           DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
-          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
         run: |
           set -Eeuo pipefail
           install -m 700 -d "$RUNNER_TEMP/deploy-ssh"
           printf '%s\n' "$DEPLOY_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/deploy-ssh/id_ed25519"
-          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$RUNNER_TEMP/deploy-ssh/known_hosts"
-          chmod 600 "$RUNNER_TEMP/deploy-ssh/id_ed25519" "$RUNNER_TEMP/deploy-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/deploy-ssh/id_ed25519"
+          
+          # Tự động quét và lưu host key chính xác của máy chủ hiện tại qua mạng Tailscale
+          ssh-keyscan -p "$DEPLOY_PORT" -H "$DEPLOY_HOST" > "$RUNNER_TEMP/deploy-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/deploy-ssh/known_hosts"
 
       - name: Verify server prerequisites
         run: |

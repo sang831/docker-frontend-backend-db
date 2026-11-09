@@ -108,8 +108,8 @@ jobs:
             --exclude='**/dist/' \
             --exclude='**/build/' \
             -e "ssh -i $RUNNER_TEMP/deploy-ssh/id_ed25519 -p $DEPLOY_PORT -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$RUNNER_TEMP/deploy-ssh/known_hosts" \
-            ./ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
-     
+            ./ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"                               
+          
       - name: Deploy and verify health
         run: |
           set -Eeuo pipefail
@@ -129,7 +129,7 @@ jobs:
           
           # Dọn dẹp container cũ và giải phóng port đang kẹt trước khi build mới
           docker compose down --remove-orphans || true
-          
+          sleep 2
           docker compose config --quiet
           docker compose up --build -d --remove-orphans
 

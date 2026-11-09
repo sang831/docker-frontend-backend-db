@@ -67,9 +67,21 @@ jobs:
           printf '%s\n' "$DEPLOY_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/deploy-ssh/id_ed25519"
           chmod 600 "$RUNNER_TEMP/deploy-ssh/id_ed25519"
           
-          # Tự động quét và lưu host key chính xác của máy chủ hiện tại qua mạng Tailscale
           ssh-keyscan -p "$DEPLOY_PORT" -H "$DEPLOY_HOST" > "$RUNNER_TEMP/deploy-ssh/known_hosts"
           chmod 600 "$RUNNER_TEMP/deploy-ssh/known_hosts"
+
+      - name: Ensure .env exists on server
+        run: |
+          set -Eeuo pipefail
+          ssh \
+            -i "$RUNNER_TEMP/deploy-ssh/id_ed25519" \
+            -p "$DEPLOY_PORT" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/deploy-ssh/known_hosts" \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            "mkdir -p $DEPLOY_PATH && echo 'APP_USERNAME=todo-admin' > $DEPLOY_PATH/.env"
 
       - name: Verify server prerequisites
         run: |
@@ -111,6 +123,7 @@ jobs:
             --exclude='**/build/' \
             -e "ssh -i $RUNNER_TEMP/deploy-ssh/id_ed25519 -p $DEPLOY_PORT -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$RUNNER_TEMP/deploy-ssh/known_hosts" \
             ./ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
+     
       - name: Deploy and verify health
         run: |
           set -Eeuo pipefail
@@ -127,6 +140,10 @@ jobs:
           set -Eeuo pipefail
           DEPLOY_PATH="$(printf '%s' "$DEPLOY_PATH_B64" | base64 -d)"
           cd "$DEPLOY_PATH"
+          
+          # Dọn dẹp container cũ và giải phóng port đang kẹt trước khi build mới
+          docker compose down --remove-orphans || true
+          
           docker compose config --quiet
           docker compose up --build -d --remove-orphans
 

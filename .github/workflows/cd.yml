@@ -111,8 +111,6 @@ jobs:
             --exclude='**/build/' \
             -e "ssh -i $RUNNER_TEMP/deploy-ssh/id_ed25519 -p $DEPLOY_PORT -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$RUNNER_TEMP/deploy-ssh/known_hosts" \
             ./ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
-      - name: Teardown old containers
-        run: docker compose down --remove-orphans
       - name: Deploy and verify health
         run: |
           set -Eeuo pipefail

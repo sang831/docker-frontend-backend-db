@@ -129,7 +129,7 @@ jobs:
           
           # Dọn dẹp container cũ và giải phóng port đang kẹt trước khi build mới
           docker compose down --remove-orphans || true
-          sleep 2
+          sleep 10
           docker compose config --quiet
           docker compose up --build -d --remove-orphans
 

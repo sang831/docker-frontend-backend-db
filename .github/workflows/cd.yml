@@ -69,20 +69,6 @@ jobs:
           
           ssh-keyscan -p "$DEPLOY_PORT" -H "$DEPLOY_HOST" > "$RUNNER_TEMP/deploy-ssh/known_hosts"
           chmod 600 "$RUNNER_TEMP/deploy-ssh/known_hosts"
-
-      - name: Ensure .env exists on server
-        run: |
-          set -Eeuo pipefail
-          ssh \
-            -i "$RUNNER_TEMP/deploy-ssh/id_ed25519" \
-            -p "$DEPLOY_PORT" \
-            -o BatchMode=yes \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes \
-            -o UserKnownHostsFile="$RUNNER_TEMP/deploy-ssh/known_hosts" \
-            "$DEPLOY_USER@$DEPLOY_HOST" \
-            "mkdir -p $DEPLOY_PATH && echo 'APP_USERNAME=todo-admin' > $DEPLOY_PATH/.env"
-
       - name: Verify server prerequisites
         run: |
           set -Eeuo pipefail
